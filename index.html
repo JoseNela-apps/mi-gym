@@ -320,7 +320,7 @@
 <!-- COACH -->
 <div class="coach" id="coach">
   <div class="coachhead"><button class="iconbtn" onclick="closeCoach()">←</button>
-    <h1>🤖 Coach</h1><button class="iconbtn" onclick="clearAIKey()">⚙</button></div>
+    <h1>🤖 Coach</h1><button class="iconbtn" onclick="newCoachChat()">🗑</button><button class="iconbtn" onclick="clearAIKey()">⚙</button></div>
   <div class="coachbody" id="coachBody"></div>
   <div class="coachbar" id="coachBar">
     <textarea id="coachInput" rows="1" placeholder="Escribe tu pregunta…" oninput="coachGrow(this)" onkeydown="coachKey(event)"></textarea>
@@ -348,6 +348,10 @@ const LIB=(function(){const m={};BASE.forEach(d=>d.groups.forEach(g=>g.ex.forEac
   return Object.values(m).sort((a,b)=>a.es.localeCompare(b.es));})();
 function syncPlanRef(){if(!store.routine||!Array.isArray(store.routine.days)||!store.routine.days.length)
   store.routine={days:blankRoutine(),updatedAt:0};PLAN=store.routine.days;}
+function syncCoachRef(){if(!store.coach||!Array.isArray(store.coach.msgs))store.coach={msgs:[],updatedAt:0};coachMsgs=store.coach.msgs;}
+function coachSave(){store.coach.updatedAt=Date.now();
+  if(store.coach.msgs.length>120)store.coach.msgs=store.coach.msgs.slice(-120);
+  coachMsgs=store.coach.msgs;save();}
 function touchRoutine(resetDayIdx){store.routine.updatedAt=Date.now();
   if(resetDayIdx!=null&&PLAN[resetDayIdx])store.day[PLAN[resetDayIdx].key]={date:today(),ex:{}};save();}
 
@@ -366,10 +370,11 @@ function schedulePush(){ if(!fbReady||!user)return; clearTimeout(pushT); pushT=s
 /* ===== DATA ===== */
 function today(){const d=new Date();return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate();}
 function load(){try{const s=JSON.parse(localStorage.getItem(LS))||{};s.day=s.day||{};s.log=s.log||{};
-  s.cursor=s.cursor||{dayIdx:0,date:""};return s;}catch(e){return {day:{},log:{},cursor:{dayIdx:0,date:""}};}}
+  s.cursor=s.cursor||{dayIdx:0,date:""};s.coach=s.coach||{msgs:[],updatedAt:0};return s;}catch(e){return {day:{},log:{},cursor:{dayIdx:0,date:""},coach:{msgs:[],updatedAt:0}};}}
 function save(){try{localStorage.setItem(LS,JSON.stringify(store));}catch(e){} if(!applyingRemote)schedulePush();}
 let store = load();
 syncPlanRef();
+syncCoachRef();
 
 function flat(i){return PLAN[i].ex;}
 function repsTarget(e){return parseInt(e.reps)||0;}
@@ -496,7 +501,7 @@ function renderHome(){
     <div class="dgrid">${dlist}</div>
     <button class="editbtn" onclick="openEditor()">✏️ Editar mi rutina</button>
     <div class="foot">Tu progreso se guarda solo y se sincroniza en la nube.<br>
-      <span style="opacity:.6">v10 · Coach IA + progresión automática</span></div>`;
+      <span style="opacity:.6">v11 · Coach con memoria</span></div>`;
 }
 
 function renderWorkout(){
@@ -660,10 +665,13 @@ function saveAIKey(){const v=(document.getElementById("aiKeyInput").value||"").t
   if(v.indexOf("sk-ant-")!==0){toast("La key debe empezar con sk-ant-");return;}
   aiKey=v;try{localStorage.setItem("gymAIKey",v);}catch(e){}toast("Coach activado ✓");showChat();}
 function clearAIKey(){if(!aiKey){closeCoach();return;}
-  if(!confirm("¿Quitar tu API key de este dispositivo?"))return;
-  aiKey="";try{localStorage.removeItem("gymAIKey");}catch(e){}coachMsgs=[];showKeySetup();}
+  if(!confirm("¿Quitar tu API key de este dispositivo? Tu conversación se conserva."))return;
+  aiKey="";try{localStorage.removeItem("gymAIKey");}catch(e){}showKeySetup();}
+function newCoachChat(){if(!coachMsgs.length){return;}
+  if(!confirm("¿Empezar de cero? Se borra el historial del coach."))return;
+  store.coach.msgs=[];coachSave();showChat();}
 function showChat(){document.getElementById("coachBar").style.display="flex";
-  if(!coachMsgs.length)coachMsgs.push({role:"assistant",content:"¡Hola! Soy tu coach 💪 Pregúntame lo que quieras: la técnica de un ejercicio, qué hacer si algo te molesta, cómo progresar, o pídeme que te ajuste un día de tu rutina."});
+  if(!coachMsgs.length){coachMsgs.push({role:"assistant",content:"¡Hola! Soy tu coach 💪 Pregúntame lo que quieras: la técnica de un ejercicio, qué hacer si algo te molesta, cómo progresar, o pídeme que te ajuste un día de tu rutina."});coachSave();}
   coachRender();setTimeout(()=>{const i=document.getElementById("coachInput");if(i)i.focus();},150);}
 function coachRender(typing){const b=document.getElementById("coachBody");if(!b)return;
   let h=coachMsgs.map(m=>`<div class="msg ${m.role==="user"?"u":"a"}">${esc(m.content)}</div>`).join("");
@@ -681,20 +689,22 @@ function coachSystem(){let r="RUTINA ACTUAL:\n";
   if(ult.length)r+="\nÚltimos pesos: "+ult.slice(0,14).join(", ");
   return "Eres el entrenador personal del usuario dentro de su app de gym. Hablas español, claro, práctico y motivador, sin rodeos. Entrena con máquinas y poleas, nivel principiante-intermedio. Da consejos concretos (ejercicio, series, reps). Si sugieres cambiar la rutina, dile que lo aplique en el editor de la app (botón Editar mi rutina). Si menciona dolor fuerte, lesión o algo médico, recomiéndale ver a un profesional de salud y no des diagnóstico. Responde breve (3-6 frases) salvo que pida más detalle.\n\n"+r;}
 async function coachSend(){const ta=document.getElementById("coachInput");const q=(ta.value||"").trim();
-  if(!q||coachBusy)return;coachMsgs.push({role:"user",content:q});ta.value="";ta.style.height="auto";
+  if(!q||coachBusy)return;coachMsgs.push({role:"user",content:q});coachSave();ta.value="";ta.style.height="auto";
   coachBusy=true;updateSend();coachRender(true);
+  let apiMsgs=coachMsgs.slice(-20).map(m=>({role:m.role==="user"?"user":"assistant",content:m.content}));
+  while(apiMsgs.length&&apiMsgs[0].role==="assistant")apiMsgs.shift();
   try{
     const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
       headers:{"content-type":"application/json","x-api-key":aiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:COACH_MODEL,max_tokens:1024,system:coachSystem(),messages:coachMsgs})});
+      body:JSON.stringify({model:COACH_MODEL,max_tokens:1024,system:coachSystem(),messages:apiMsgs})});
     const data=await res.json();
     if(!res.ok||data.error)throw new Error((data.error&&data.error.message)||("HTTP "+res.status));
     const text=(data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n").trim()||"(sin respuesta)";
-    coachMsgs.push({role:"assistant",content:text});
+    coachMsgs.push({role:"assistant",content:text});coachSave();
   }catch(err){let m=(err&&err.message)?err.message:"Error de conexión";
     if(/auth|api.?key|401|credit|x-api-key/i.test(m))m="Tu API key no es válida o no tiene crédito. Revísala en console.anthropic.com.";
     else if(/model/i.test(m))m="Ese modelo no está disponible en tu cuenta — avísame y lo cambio.";
-    coachMsgs.push({role:"assistant",content:"⚠️ "+m});}
+    coachMsgs.push({role:"assistant",content:"⚠️ "+m});coachSave();}
   coachBusy=false;updateSend();coachRender();}
 
 /* ===== REST TIMER ===== */
@@ -729,10 +739,11 @@ function initFirebase(){
   }catch(e){console.warn("Firebase init:",e);}updateSyncUI();
 }
 function connectRemote(){if(!fbReady||!user)return;remoteRef=fdb.ref("users/"+user.uid);
-  remoteRef.get().then(snap=>{const remote=normalize(snap.val());store=mergeStores(store,remote);syncPlanRef();
+  remoteRef.get().then(snap=>{const remote=normalize(snap.val());store=mergeStores(store,remote);syncPlanRef();syncCoachRef();
     applyingRemote=true;save();applyingRemote=false;pushRemote();render();
-    remoteRef.on("value",s2=>{const r=normalize(s2.val());store=mergeStores(store,r);syncPlanRef();
-      applyingRemote=true;save();applyingRemote=false;render();});
+    remoteRef.on("value",s2=>{const r=normalize(s2.val());store=mergeStores(store,r);syncPlanRef();syncCoachRef();
+      applyingRemote=true;save();applyingRemote=false;render();
+      if(coachEl&&coachEl.classList.contains("show")&&aiKey)coachRender();});
     toast("Sincronizado ✓");}).catch(()=>toast("Error al sincronizar"));}
 function disconnectRemote(){if(remoteRef){remoteRef.off();remoteRef=null;}}
 function pushRemote(){if(!fbReady||!user)return;try{fdb.ref("users/"+user.uid).set(store);}catch(e){}}
@@ -744,6 +755,8 @@ function normalize(s){s=s||{};const out={day:{},log:{}};
     days:toArr(s.routine.days).map(d=>({key:d.key,em:d.em,name:d.name,
       ex:toArr(d.ex).map(e=>({img:e.img,es:e.es,en:e.en,muscle:e.muscle,color:e.color,target:e.target,
         alt:e.alt,cues:toArr(e.cues),sets:parseInt(e.sets)||1,reps:""+(e.reps!=null?e.reps:""),rest:e.rest||"60s"}))}))};}
+  if(s.coach&&s.coach.msgs){out.coach={updatedAt:parseInt(s.coach.updatedAt)||0,
+    msgs:toArr(s.coach.msgs).map(m=>({role:m.role==="user"?"user":"assistant",content:""+(m.content||"")})).slice(-120)};}
   const log=s.log||{};Object.keys(log).forEach(f=>{out.log[f]=toArr(log[f]).map(e=>({date:e.date,sets:toArr(e.sets).map(x=>({w:x&&x.w!=null?x.w:"",r:x&&x.r!=null?x.r:""}))}));});
   const day=s.day||{};Object.keys(day).forEach(k=>{const d=day[k]||{};const ex={};const exo=d.ex||{};
     Object.keys(exo).forEach(id=>{ex[id]={sets:toArr(exo[id]&&exo[id].sets).map(x=>({w:x&&x.w!=null?x.w:"",r:x&&x.r!=null?x.r:"",done:!!(x&&x.done)}))};});
@@ -753,6 +766,8 @@ function mergeStores(a,b){a=a||{day:{},log:{}};b=b||{day:{},log:{}};const out={d
   if(ca&&cb)out.cursor=(new Date(ca.date||0)>=new Date(cb.date||0))?ca:cb; else out.cursor=ca||cb||{dayIdx:0,date:""};
   const ra=a.routine,rb=b.routine;
   if(ra&&rb)out.routine=((ra.updatedAt||0)>=(rb.updatedAt||0))?ra:rb; else out.routine=ra||rb;
+  const ka=a.coach,kb=b.coach;
+  if(ka&&kb)out.coach=((ka.updatedAt||0)>=(kb.updatedAt||0))?ka:kb; else out.coach=ka||kb;
   const folders=new Set([...Object.keys(a.log||{}),...Object.keys(b.log||{})]);
   folders.forEach(f=>{const byDate={};
     (a.log[f]||[]).forEach(e=>{byDate[e.date]=e;});
